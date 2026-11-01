@@ -28,6 +28,7 @@ export default function PDFViewer() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [pageStates, setPageStates] = useState<Record<number, PageState>>({});
+  const [pageDimensions, setPageDimensions] = useState<Record<number, { width: number; height: number }>>({});
   const [outline, setOutline] = useState<any[]>([]);
   const [showOutline, setShowOutline] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
@@ -144,10 +145,23 @@ export default function PDFViewer() {
       setCurrentPage(1);
       setZoom(1);
       setPageStates({});
+      setPageDimensions({});
       setActiveSearchTerm('');
       setSearchPages([]);
       setSearchPageIndex(0);
       setOutline((await loaded.getOutline()) ?? []);
+
+      // Read page dimensions up front so lazy-rendered pages reserve their
+      // final space. Without this, placeholder pages grow as they render and
+      // can move the scroll target during long-distance navigation.
+      const dimensions: Record<number, { width: number; height: number }> = {};
+      for (let pageNumber = 1; pageNumber <= loaded.numPages; pageNumber += 1) {
+        const page = await loaded.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1 });
+        dimensions[pageNumber] = { width: viewport.width, height: viewport.height };
+      }
+      if (generation === documentGeneration.current) setPageDimensions(dimensions);
+
       // Temporary full-document scan to identify InDesign navigation buttons
       // exported as PDF form widgets instead of Link annotations.
       void diagnosePdfNavigation(loaded).then((report) => {
@@ -285,7 +299,23 @@ export default function PDFViewer() {
           {!pdf && !loading && <div className={styles.emptyState}><div className={styles.emptyIcon}><FileUp size={30} /></div><h1>Your documents, ready to explore.</h1><p>Open an interactive PDF to start reading. Recent files are saved privately in this browser on this device.</p><button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /> Browse device files</button>{recentDocuments.length > 0 && <div className={styles.recentSection}><h2>Recent documents</h2>{recentDocuments.map((item) => <button className={styles.recentItem} key={item.id} onClick={() => void openRecent(item.id)}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleDateString()} · {(item.size / 1024 / 1024).toFixed(1)} MB</small></span></button>)}</div>}<span className={styles.supportNote}>On phones and tablets, Browse opens your device’s file picker.</span></div>}
           {loading && <div className={styles.loadingState}><div className={styles.spinner} /><p>Opening your document…</p></div>}
           {error && <div className={styles.errorBanner} role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
-          {pdf && Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <div className={styles.pageSlot} key={pageNumber} data-page={pageNumber} ref={(node) => { if (node) pageRefs.current.set(pageNumber, node); else pageRefs.current.delete(pageNumber); }}><div className={styles.pageLabel}>Page {pageNumber}</div><div className={styles.pageCanvas}><canvas aria-label={`PDF page ${pageNumber}`} /><div className={styles.textLayer} data-text-layer aria-label={`Selectable text on page ${pageNumber}`} /><div className={styles.annotationLayer} data-annotation-layer aria-label={`Interactive links on page ${pageNumber}`} />{pageStates[pageNumber] === 'loading' && <span className={styles.pageLoading}>Rendering page…</span>}{pageStates[pageNumber] === 'error' && <span className={styles.pageLoading}>This page could not be rendered.</span>}</div></div>)}
+          {pdf && Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => {
+            const dimensions = pageDimensions[pageNumber];
+            const availableWidth = Math.max(280, Math.min(scrollerRef.current?.clientWidth ?? 900, 1100) - 40);
+            const fitScale = dimensions ? Math.min(1.5, availableWidth / dimensions.width) : 1;
+            const reservedWidth = dimensions ? dimensions.width * fitScale * zoom : undefined;
+            const reservedHeight = dimensions ? dimensions.height * fitScale * zoom : undefined;
+            return <div className={styles.pageSlot} key={pageNumber} data-page={pageNumber} ref={(node) => { if (node) pageRefs.current.set(pageNumber, node); else pageRefs.current.delete(pageNumber); }}>
+              <div className={styles.pageLabel}>Page {pageNumber}</div>
+              <div className={styles.pageCanvas} style={reservedWidth && reservedHeight ? { width: reservedWidth, height: reservedHeight } : undefined}>
+                <canvas aria-label={`PDF page ${pageNumber}`} />
+                <div className={styles.textLayer} data-text-layer aria-label={`Selectable text on page ${pageNumber}`} />
+                <div className={styles.annotationLayer} data-annotation-layer aria-label={`Interactive links on page ${pageNumber}`} />
+                {pageStates[pageNumber] === 'loading' && <span className={styles.pageLoading}>Rendering page…</span>}
+                {pageStates[pageNumber] === 'error' && <span className={styles.pageLoading}>This page could not be rendered.</span>}
+              </div>
+            </div>;
+          })}
         </section>
       </div>
 
