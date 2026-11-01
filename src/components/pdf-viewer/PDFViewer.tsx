@@ -1,17 +1,17 @@
 'use client';
 
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, ChevronLeft, ChevronRight, FileUp, History, Minus, Plus, RotateCcw, Search, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, FileUp, History, Minus, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import { getPdfJs } from '@/lib/pdf/pdfjs';
 import { diagnosePdfNavigation, renderAnnotationLinks } from '@/lib/pdf/annotations';
 import { renderSelectableText } from '@/lib/pdf/textLayer';
-import { getRecentDocument, listRecentDocuments, saveRecentDocument, type RecentDocument } from '@/lib/pdf/recentDocuments';
+import { clearRecentDocuments, deleteRecentDocument, getRecentDocument, listRecentDocuments, saveRecentDocument, type RecentDocument } from '@/lib/pdf/recentDocuments';
 import styles from './PDFViewer.module.scss';
 
 type PageState = 'idle' | 'loading' | 'ready' | 'error';
 
-export default function PDFViewer() {
+export default function PDFViewer({ sourceUrl, documentTitle }: { sourceUrl?: string; documentTitle?: string } = {}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -119,8 +119,10 @@ export default function PDFViewer() {
     return work;
   }, [setPageState, zoom, activeSearchTerm]);
 
-  const openPdf = useCallback(async (file: File) => {
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+  const openPdf = useCallback(async (file: File | string) => {
+    const isRemote = typeof file === 'string';
+    const sourceName = isRemote ? (documentTitle || file.split('/').pop() || 'Online document.pdf') : file.name;
+    if (!isRemote && file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       setError('Please choose a valid PDF file.');
       return;
     }
@@ -135,12 +137,14 @@ export default function PDFViewer() {
       await previousDocument?.destroy();
       if (generation !== documentGeneration.current) return;
       const pdfjs = await getPdfJs();
-      const data = new Uint8Array(await file.arrayBuffer());
-      const loaded = await pdfjs.getDocument({ data }).promise;
+      const loadingTask = isRemote
+        ? pdfjs.getDocument({ url: file, withCredentials: false })
+        : pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+      const loaded = await loadingTask.promise;
       if (generation !== documentGeneration.current) { await loaded.destroy(); return; }
       pdfRef.current = loaded;
       setPdf(loaded);
-      setFileName(file.name);
+      setFileName(sourceName);
       setPageCount(loaded.numPages);
       setCurrentPage(1);
       setZoom(1);
@@ -181,14 +185,21 @@ export default function PDFViewer() {
       }).catch((diagnosticError) => {
         console.warn('[AcroReader] PDF navigation diagnostic failed.', diagnosticError);
       });
-      try { setRecentDocuments(await saveRecentDocument(file)); } catch (storageError) { console.warn('Could not save this PDF to recent documents.', storageError); }
+      if (!isRemote) {
+        try { setRecentDocuments(await saveRecentDocument(file)); } catch (storageError) { console.warn('Could not save this PDF to recent documents.', storageError); }
+      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'The PDF could not be opened.';
       setError(message.includes('password') ? 'This PDF is password-protected. Password entry will be added in a later milestone.' : `Unable to open this PDF. ${message}`);
     } finally {
       if (generation === documentGeneration.current) setLoading(false);
     }
-  }, [cancelRenders]);
+  }, [cancelRenders, documentTitle]);
+
+  useEffect(() => {
+    if (!sourceUrl) return;
+    void openPdf(sourceUrl);
+  }, [sourceUrl, openPdf]);
 
   useEffect(() => {
     if (!pdf) return;
@@ -225,6 +236,51 @@ export default function PDFViewer() {
   }, [zoom, pdf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const element = scrollerRef.current;
+    if (!element) return;
+
+    let startDistance = 0;
+    let startZoom = 1;
+
+    const distanceBetweenTouches = (touches: TouchList) => {
+      const first = touches[0];
+      const second = touches[1];
+      return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        startDistance = distanceBetweenTouches(event.touches);
+        startZoom = zoom;
+      }
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (event.touches.length !== 2 || startDistance <= 0) return;
+      event.preventDefault();
+      const scale = distanceBetweenTouches(event.touches) / startDistance;
+      const nextZoom = Math.max(0.5, Math.min(2.5, startZoom * scale));
+      setZoom(Number(nextZoom.toFixed(2)));
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length < 2) startDistance = 0;
+    };
+
+    element.addEventListener('touchstart', onTouchStart, { passive: true });
+    element.addEventListener('touchmove', onTouchMove, { passive: false });
+    element.addEventListener('touchend', onTouchEnd, { passive: true });
+    element.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+    return () => {
+      element.removeEventListener('touchstart', onTouchStart);
+      element.removeEventListener('touchmove', onTouchMove);
+      element.removeEventListener('touchend', onTouchEnd);
+      element.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [zoom]);
+
+  useEffect(() => {
     void listRecentDocuments().then(setRecentDocuments).catch((cause) => console.warn('Recent documents are unavailable.', cause));
     return () => {
       documentGeneration.current += 1;
@@ -253,6 +309,28 @@ export default function PDFViewer() {
   };
 
   const changeZoom = (delta: number) => setZoom((value) => Math.max(0.5, Math.min(2.5, Number((value + delta).toFixed(2)))));
+
+  const removeRecent = async (id: string) => {
+    if (!window.confirm('Remove this PDF from recent documents on this device?')) return;
+    try {
+      await deleteRecentDocument(id);
+      setRecentDocuments(await listRecentDocuments());
+    } catch (cause) {
+      console.error('Could not delete this recent PDF.', cause);
+      setError('Could not remove this PDF from this device.');
+    }
+  };
+
+  const removeAllRecent = async () => {
+    if (!window.confirm('Delete all locally saved PDFs from this device? This cannot be undone.')) return;
+    try {
+      await clearRecentDocuments();
+      setRecentDocuments([]);
+    } catch (cause) {
+      console.error('Could not clear recent PDFs.', cause);
+      setError('Could not clear locally saved PDFs.');
+    }
+  };
 
   const searchInDocument = async () => {
     if (!pdf || !searchTerm.trim()) return;
@@ -294,9 +372,9 @@ export default function PDFViewer() {
       {showSearch && <div className={styles.searchBar}><Search size={17} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void searchInDocument()} placeholder="Search text in this PDF" /><button onClick={() => void searchInDocument()}>Find</button>{searchPages.length > 0 && <><span className={styles.searchCount}>{searchPageIndex + 1} / {searchPages.length} pages</span><button onClick={() => moveSearchResult(-1)} aria-label="Previous search result">↑</button><button onClick={() => moveSearchResult(1)} aria-label="Next search result">↓</button></>}<button className={styles.iconButton} onClick={() => setShowSearch(false)} aria-label="Close search"><X size={16} /></button></div>}
 
       <div className={styles.workspace}>
-        {showRecent && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Recent documents<button className={styles.iconButton} onClick={() => setShowRecent(false)} aria-label="Close recent documents"><X size={16} /></button></div>{recentDocuments.length ? recentDocuments.map((item) => <button className={styles.recentItem} key={item.id} onClick={() => { setShowRecent(false); void openRecent(item.id); }}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleString()}</small></span></button>) : <p className={styles.muted}>PDFs you open on this device will appear here.</p>}</aside>}{showOutline && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Document outline<button className={styles.iconButton} onClick={() => setShowOutline(false)} aria-label="Close bookmarks"><X size={16} /></button></div>{outline.length ? outline.map((item, index) => <button className={styles.outlineItem} key={`${item.title}-${index}`} onClick={async () => { if (typeof item.dest === 'string') { const destination = await pdf?.getDestination(item.dest); if (destination && pdf) { const ref = destination[0]; const pageIndex = await pdf.getPageIndex(ref); jumpToPage(pageIndex + 1); } } }}>{item.title}</button>) : <p className={styles.muted}>This document has no bookmarks.</p>}</aside>}
+        {showRecent && <aside className={styles.outlinePanel}><div className={styles.panelHeading}><span>Recent documents</span><span className={styles.panelActions}>{recentDocuments.length > 0 && <button className={styles.clearRecentButton} onClick={() => void removeAllRecent()}>Clear all</button>}<button className={styles.iconButton} onClick={() => setShowRecent(false)} aria-label="Close recent documents"><X size={16} /></button></span></div>{recentDocuments.length ? recentDocuments.map((item) => <div className={styles.recentItemRow} key={item.id}><button className={styles.recentItem} onClick={() => { setShowRecent(false); void openRecent(item.id); }}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleString()}</small></span></button><button className={styles.deleteRecentButton} onClick={() => void removeRecent(item.id)} aria-label={`Delete ${item.name}`} title="Delete from this device"><Trash2 size={16} /></button></div>) : <p className={styles.muted}>PDFs you open on this device will appear here.</p>}</aside>}{showOutline && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Document outline<button className={styles.iconButton} onClick={() => setShowOutline(false)} aria-label="Close bookmarks"><X size={16} /></button></div>{outline.length ? outline.map((item, index) => <button className={styles.outlineItem} key={`${item.title}-${index}`} onClick={async () => { if (typeof item.dest === 'string') { const destination = await pdf?.getDestination(item.dest); if (destination && pdf) { const ref = destination[0]; const pageIndex = await pdf.getPageIndex(ref); jumpToPage(pageIndex + 1); } } }}>{item.title}</button>) : <p className={styles.muted}>This document has no bookmarks.</p>}</aside>}
         <section className={styles.readerArea} ref={scrollerRef}>
-          {!pdf && !loading && <div className={styles.emptyState}><div className={styles.emptyIcon}><FileUp size={30} /></div><h1>Your documents, ready to explore.</h1><p>Open an interactive PDF to start reading. Recent files are saved privately in this browser on this device.</p><button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /> Browse device files</button>{recentDocuments.length > 0 && <div className={styles.recentSection}><h2>Recent documents</h2>{recentDocuments.map((item) => <button className={styles.recentItem} key={item.id} onClick={() => void openRecent(item.id)}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleDateString()} · {(item.size / 1024 / 1024).toFixed(1)} MB</small></span></button>)}</div>}<span className={styles.supportNote}>On phones and tablets, Browse opens your device’s file picker.</span></div>}
+          {!pdf && !loading && <div className={styles.emptyState}><div className={styles.emptyIcon}><FileUp size={30} /></div><h1>Your documents, ready to explore.</h1><p>Open an interactive PDF to start reading. Recent files are saved privately in this browser on this device.</p><button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /> Browse device files</button>{recentDocuments.length > 0 && <div className={styles.recentSection}><h2>Recent documents</h2>{recentDocuments.map((item) => <div className={styles.recentItemRow} key={item.id}><button className={styles.recentItem} onClick={() => void openRecent(item.id)}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleDateString()} · {(item.size / 1024 / 1024).toFixed(1)} MB</small></span></button><button className={styles.deleteRecentButton} onClick={() => void removeRecent(item.id)} aria-label={`Delete ${item.name}`} title="Delete from this device"><Trash2 size={16} /></button></div>)}</div>}<span className={styles.supportNote}>On phones and tablets, Browse opens your device’s file picker.</span></div>}
           {loading && <div className={styles.loadingState}><div className={styles.spinner} /><p>Opening your document…</p></div>}
           {error && <div className={styles.errorBanner} role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
           {pdf && Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => {

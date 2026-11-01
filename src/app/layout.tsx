@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.scss';
 
 export const metadata: Metadata = {
-  title: 'AcroReader — Interactive PDF Reader',
-  description: 'A responsive reader for interactive PDF documents.',
+  title: 'AcroReader — Aviation Document Portal',
+  description: 'Browse published aircraft manuals and aviation operational documents in AcroReader.',
   applicationName: 'AcroReader',
 };
 
