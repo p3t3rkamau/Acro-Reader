@@ -4,6 +4,7 @@ import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, ChevronLeft, ChevronRight, FileUp, Minus, Plus, RotateCcw, Search, X } from 'lucide-react';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import { getPdfJs } from '@/lib/pdf/pdfjs';
+import { renderAnnotationLinks } from '@/lib/pdf/annotations';
 import styles from './PDFViewer.module.scss';
 
 type PageState = 'idle' | 'loading' | 'ready' | 'error';
@@ -45,18 +46,28 @@ export default function PDFViewer() {
       const baseViewport = page.getViewport({ scale: 1 });
       const availableWidth = Math.max(280, Math.min(host.parentElement?.clientWidth ?? 900, 1100) - 40);
       const fitScale = Math.min(1.5, availableWidth / baseViewport.width);
-      const viewport = page.getViewport({ scale: fitScale * zoom * Math.min(window.devicePixelRatio || 1, 2) });
+      const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+      const cssViewport = page.getViewport({ scale: fitScale * zoom });
+      const renderViewport = page.getViewport({ scale: fitScale * zoom * outputScale });
       const canvas = host.querySelector('canvas');
-      if (!canvas) return;
+      const annotationLayer = host.querySelector<HTMLDivElement>('[data-annotation-layer]');
+      if (!canvas || !annotationLayer) return;
       const context = canvas.getContext('2d', { alpha: false });
       if (!context) throw new Error('Your browser could not create a canvas rendering context.');
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      canvas.style.width = `${viewport.width / Math.min(window.devicePixelRatio || 1, 2)}px`;
-      canvas.style.height = `${viewport.height / Math.min(window.devicePixelRatio || 1, 2)}px`;
-      const task = page.render({ canvasContext: context, viewport, canvas } as Parameters<PDFPageProxy['render']>[0]);
+      canvas.width = Math.floor(renderViewport.width);
+      canvas.height = Math.floor(renderViewport.height);
+      canvas.style.width = `${cssViewport.width}px`;
+      canvas.style.height = `${cssViewport.height}px`;
+      annotationLayer.style.width = `${cssViewport.width}px`;
+      annotationLayer.style.height = `${cssViewport.height}px`;
+      const task = page.render({ canvasContext: context, viewport: renderViewport, canvas } as Parameters<PDFPageProxy['render']>[0]);
       renderTasks.current.set(pageNumber, task);
       await task.promise;
+      await renderAnnotationLinks(annotationLayer, page, document, cssViewport, (targetPage) => {
+        const safePage = Math.max(1, Math.min(document.numPages, targetPage));
+        pageRefs.current.get(safePage)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setCurrentPage(safePage);
+      });
       setPageState(pageNumber, 'ready');
     } catch (cause) {
       if (cause instanceof Error && cause.name === 'RenderingCancelledException') return;
@@ -180,7 +191,7 @@ export default function PDFViewer() {
           {!pdf && !loading && <div className={styles.emptyState}><div className={styles.emptyIcon}><FileUp size={30} /></div><h1>Your documents, ready to explore.</h1><p>Open an interactive PDF to start reading. Your file stays in this browser session.</p><button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /> Open a PDF document</button><span className={styles.supportNote}>Best experienced on mobile, tablet and desktop.</span></div>}
           {loading && <div className={styles.loadingState}><div className={styles.spinner} /><p>Opening your document…</p></div>}
           {error && <div className={styles.errorBanner} role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
-          {pdf && Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <div className={styles.pageSlot} key={pageNumber} data-page={pageNumber} ref={(node) => { if (node) pageRefs.current.set(pageNumber, node); else pageRefs.current.delete(pageNumber); }}><div className={styles.pageLabel}>Page {pageNumber}</div><div className={styles.pageCanvas}><canvas aria-label={`PDF page ${pageNumber}`} />{pageStates[pageNumber] === 'loading' && <span className={styles.pageLoading}>Rendering page…</span>}{pageStates[pageNumber] === 'error' && <span className={styles.pageLoading}>This page could not be rendered.</span>}</div></div>)}
+          {pdf && Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <div className={styles.pageSlot} key={pageNumber} data-page={pageNumber} ref={(node) => { if (node) pageRefs.current.set(pageNumber, node); else pageRefs.current.delete(pageNumber); }}><div className={styles.pageLabel}>Page {pageNumber}</div><div className={styles.pageCanvas}><canvas aria-label={`PDF page ${pageNumber}`} /><div className={styles.annotationLayer} data-annotation-layer aria-label={`Interactive links on page ${pageNumber}`} />{pageStates[pageNumber] === 'loading' && <span className={styles.pageLoading}>Rendering page…</span>}{pageStates[pageNumber] === 'error' && <span className={styles.pageLoading}>This page could not be rendered.</span>}</div></div>)}
         </section>
       </div>
 
