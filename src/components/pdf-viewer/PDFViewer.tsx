@@ -63,6 +63,7 @@ export default function PDFViewer() {
     let task: RenderTask | undefined;
     try {
       const page: PDFPageProxy = await document.getPage(pageNumber);
+      if (generation !== documentGeneration.current || epoch !== renderEpoch.current || pdfRef.current !== document) return;
       const baseViewport = page.getViewport({ scale: 1 });
       const availableWidth = Math.max(280, Math.min(host.parentElement?.clientWidth ?? 900, 1100) - 40);
       const fitScale = Math.min(1.5, availableWidth / baseViewport.width);
@@ -143,6 +144,9 @@ export default function PDFViewer() {
       setCurrentPage(1);
       setZoom(1);
       setPageStates({});
+      setActiveSearchTerm('');
+      setSearchPages([]);
+      setSearchPageIndex(0);
       setOutline((await loaded.getOutline()) ?? []);
       try { setRecentDocuments(await saveRecentDocument(file)); } catch (storageError) { console.warn('Could not save this PDF to recent documents.', storageError); }
     } catch (cause) {
