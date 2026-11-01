@@ -1,7 +1,7 @@
 'use client';
 
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, ChevronLeft, ChevronRight, FileUp, Minus, Plus, RotateCcw, Search, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, FileUp, History, Minus, Plus, RotateCcw, Search, X } from 'lucide-react';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import { getPdfJs } from '@/lib/pdf/pdfjs';
 import { renderAnnotationLinks } from '@/lib/pdf/annotations';
@@ -17,6 +17,7 @@ export default function PDFViewer() {
   const renderTasks = useRef<Map<number, RenderTask>>(new Map());
   const renderPromises = useRef<Map<number, Promise<void>>>(new Map());
   const documentGeneration = useRef(0);
+  const renderEpoch = useRef(0);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [fileName, setFileName] = useState('No document opened');
@@ -28,6 +29,7 @@ export default function PDFViewer() {
   const [pageStates, setPageStates] = useState<Record<number, PageState>>({});
   const [outline, setOutline] = useState<any[]>([]);
   const [showOutline, setShowOutline] = useState(false);
+  const [showRecent, setShowRecent] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
@@ -37,6 +39,7 @@ export default function PDFViewer() {
   }, []);
 
   const cancelRenders = useCallback(async () => {
+    renderEpoch.current += 1;
     const tasks = Array.from(renderTasks.current.values());
     tasks.forEach((task) => task.cancel());
     await Promise.allSettled(tasks.map((task) => task.promise));
@@ -48,9 +51,10 @@ export default function PDFViewer() {
     const existing = renderPromises.current.get(pageNumber);
     if (existing) return existing;
     const generation = documentGeneration.current;
+    const epoch = renderEpoch.current;
     const work = (async () => {
     const host = pageRefs.current.get(pageNumber);
-    if (!host || generation !== documentGeneration.current) return;
+    if (!host || generation !== documentGeneration.current || epoch !== renderEpoch.current) return;
     setPageState(pageNumber, 'loading');
     let task: RenderTask | undefined;
     try {
@@ -73,7 +77,7 @@ export default function PDFViewer() {
       task = page.render({ canvasContext: context, viewport: renderViewport, canvas } as Parameters<PDFPageProxy['render']>[0]);
       renderTasks.current.set(pageNumber, task);
       await task.promise;
-      if (generation !== documentGeneration.current || pdfRef.current !== document) return;
+      if (generation !== documentGeneration.current || epoch !== renderEpoch.current || pdfRef.current !== document) return;
       // The canvas may be constrained by the mobile viewport at high zoom.
       // Match the link layer to its final on-screen size, not its requested size.
       const displayedWidth = canvas.clientWidth || cssViewport.width;
@@ -87,10 +91,10 @@ export default function PDFViewer() {
         pageRefs.current.get(safePage)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         setCurrentPage(safePage);
       });
-      if (generation === documentGeneration.current) setPageState(pageNumber, 'ready');
+      if (generation === documentGeneration.current && epoch === renderEpoch.current) setPageState(pageNumber, 'ready');
     } catch (cause) {
       if (cause instanceof Error && cause.name === 'RenderingCancelledException') return;
-      if (generation === documentGeneration.current) {
+      if (generation === documentGeneration.current && epoch === renderEpoch.current) {
         console.error(`Failed to render PDF page ${pageNumber}`, cause);
         setPageState(pageNumber, 'error');
       }
@@ -224,7 +228,7 @@ export default function PDFViewer() {
         <div className={styles.documentName} title={fileName}>{fileName}</div>
         <div className={styles.headerActions}>
           <button className={styles.iconButton} aria-label="Search document" onClick={() => setShowSearch((value) => !value)} disabled={!pdf}><Search size={18} /></button>
-          <button className={styles.iconButton} aria-label="Show bookmarks" onClick={() => setShowOutline((value) => !value)} disabled={!pdf}><BookOpen size={18} /></button>
+          <button className={styles.iconButton} aria-label="Recent documents" title="Recent documents" onClick={() => { setShowRecent((value) => !value); setShowOutline(false); }}><History size={18} /></button><button className={styles.iconButton} aria-label="Show bookmarks" onClick={() => { setShowOutline((value) => !value); setShowRecent(false); }} disabled={!pdf}><BookOpen size={18} /></button>
           <button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /><span>Open PDF</span></button>
           <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={onFileChange} />
         </div>
@@ -233,7 +237,7 @@ export default function PDFViewer() {
       {showSearch && <div className={styles.searchBar}><Search size={17} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void searchInDocument()} placeholder="Search text in this PDF" /><button onClick={() => void searchInDocument()}>Find</button><button className={styles.iconButton} onClick={() => setShowSearch(false)} aria-label="Close search"><X size={16} /></button></div>}
 
       <div className={styles.workspace}>
-        {showOutline && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Document outline<button className={styles.iconButton} onClick={() => setShowOutline(false)} aria-label="Close bookmarks"><X size={16} /></button></div>{outline.length ? outline.map((item, index) => <button className={styles.outlineItem} key={`${item.title}-${index}`} onClick={async () => { if (typeof item.dest === 'string') { const destination = await pdf?.getDestination(item.dest); if (destination && pdf) { const ref = destination[0]; const pageIndex = await pdf.getPageIndex(ref); jumpToPage(pageIndex + 1); } } }}>{item.title}</button>) : <p className={styles.muted}>This document has no bookmarks.</p>}</aside>}
+        {showRecent && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Recent documents<button className={styles.iconButton} onClick={() => setShowRecent(false)} aria-label="Close recent documents"><X size={16} /></button></div>{recentDocuments.length ? recentDocuments.map((item) => <button className={styles.recentItem} key={item.id} onClick={() => { setShowRecent(false); void openRecent(item.id); }}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleString()}</small></span></button>) : <p className={styles.muted}>PDFs you open on this device will appear here.</p>}</aside>}{showOutline && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Document outline<button className={styles.iconButton} onClick={() => setShowOutline(false)} aria-label="Close bookmarks"><X size={16} /></button></div>{outline.length ? outline.map((item, index) => <button className={styles.outlineItem} key={`${item.title}-${index}`} onClick={async () => { if (typeof item.dest === 'string') { const destination = await pdf?.getDestination(item.dest); if (destination && pdf) { const ref = destination[0]; const pageIndex = await pdf.getPageIndex(ref); jumpToPage(pageIndex + 1); } } }}>{item.title}</button>) : <p className={styles.muted}>This document has no bookmarks.</p>}</aside>}
         <section className={styles.readerArea} ref={scrollerRef}>
           {!pdf && !loading && <div className={styles.emptyState}><div className={styles.emptyIcon}><FileUp size={30} /></div><h1>Your documents, ready to explore.</h1><p>Open an interactive PDF to start reading. Recent files are saved privately in this browser on this device.</p><button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /> Browse device files</button>{recentDocuments.length > 0 && <div className={styles.recentSection}><h2>Recent documents</h2>{recentDocuments.map((item) => <button className={styles.recentItem} key={item.id} onClick={() => void openRecent(item.id)}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleDateString()} · {(item.size / 1024 / 1024).toFixed(1)} MB</small></span></button>)}</div>}<span className={styles.supportNote}>On phones and tablets, Browse opens your device’s file picker.</span></div>}
           {loading && <div className={styles.loadingState}><div className={styles.spinner} /><p>Opening your document…</p></div>}
