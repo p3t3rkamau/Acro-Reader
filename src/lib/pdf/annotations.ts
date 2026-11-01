@@ -135,13 +135,30 @@ export async function renderAnnotationLinks(
             : await document.getPageIndex(pageReference);
           const targetPage = pageIndex + 1;
 
+          const pageReferenceDetails = typeof pageReference === 'object' && pageReference !== null
+            ? {
+                num: 'num' in pageReference ? pageReference.num : undefined,
+                gen: 'gen' in pageReference ? pageReference.gen : undefined,
+                value: String(pageReference),
+              }
+            : pageReference;
+
           console.info('[AcroReader] PDF navigation click', {
             sourcePage: page.pageNumber,
-            button: annotation.fieldName || annotation.title,
+            button: annotation.fieldName || annotation.title || '(unnamed annotation)',
+            annotationType: annotation.annotationType,
+            subtype: annotation.subtype,
+            destinationSource: typeof annotation.dest === 'string' ? 'named destination' : 'direct destination',
             destinationName: typeof annotation.dest === 'string' ? annotation.dest : undefined,
-            pageReference: typeof pageReference === 'object' && pageReference !== null && 'toString' in pageReference
-              ? String(pageReference)
-              : pageReference,
+            destinationArray: destination.map((value, index) => {
+              if (index === 0) return pageReferenceDetails;
+              if (value && typeof value === 'object') {
+                return { index, value: String(value) };
+              }
+              return value;
+            }),
+            pageReference: pageReferenceDetails,
+            pageIndex,
             resolvedPage: targetPage,
           });
 
