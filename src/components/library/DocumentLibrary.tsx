@@ -57,7 +57,7 @@ export default function DocumentLibrary({ path = [] }: Props) {
           <span className={styles.brandMark}><BookOpen size={19} /></span>
           <span>AcroReader</span>
         </Link>
-        <span className={styles.publicLabel}>Public document library</span>
+        <Link className={styles.publicLabel} href="/reader">Open a PDF from device</Link>
       </header>
 
       <section className={styles.content}>
@@ -101,7 +101,7 @@ export default function DocumentLibrary({ path = [] }: Props) {
             </div>
             <div className={styles.documentList}>
               {documents.map((document) => (
-                <a className={styles.documentRow} key={document.id} href={document.fileUrl}>
+                <Link className={styles.documentRow} key={document.id} href={`/reader?url=${encodeURIComponent(document.fileUrl)}&title=${encodeURIComponent(document.title)}`}>
                   <span className={styles.pdfIcon}><FileText size={20} /></span>
                   <span className={styles.documentCopy}>
                     <strong>{document.title}</strong>
