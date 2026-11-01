@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { ArrowRight, BookOpen, ChevronRight, FileText, Folder, Plane, Upload, Wrench } from 'lucide-react';
+import logo from '@/images/Logo Final.jpeg';
 import {
   findLibraryFolder,
   getLibraryBreadcrumbs,
@@ -64,9 +66,7 @@ export default function DocumentLibrary({ path = [] }: Props) {
       <header className={styles.header}>
         <div className={styles.headerInner}>
           <Link href="/" className={styles.brand} aria-label="AcroReader home">
-            {/* Replace this placeholder with the company JPEG logo when ready. */}
-            <span className={styles.logoPlaceholder}>LOGO</span>
-            <span className={styles.brandText}>Acro<span>Reader</span><small>AVIATION DOCUMENT PORTAL</small></span>
+            <Image src={logo} alt="Leading Edge Aviation Limited" className={styles.brandLogo} priority />
           </Link>
           <Link className={styles.primaryAction} href="/reader">
             <Upload size={18} />

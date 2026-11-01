@@ -2,6 +2,7 @@
 .header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.94);backdrop-filter:blur(16px);border-bottom:1px solid #e7edf5}
 .headerInner{width:min(1200px,100%);height:82px;margin:0 auto;padding:0 30px;display:flex;align-items:center;justify-content:space-between;gap:24px}
 .brand{display:inline-flex;align-items:center;gap:13px;text-decoration:none;color:#142b4d;min-width:0}
+.brandLogo{width:100px;height:auto;object-fit:contain}
 .logoPlaceholder{width:48px;height:48px;flex:0 0 48px;border:1.5px dashed #9aacc4;border-radius:12px;display:grid;place-items:center;background:#f5f8fc;color:#6f83a0;font-size:9px;font-weight:800;letter-spacing:1px}
 .brandText{display:flex;flex-direction:column;font-size:21px;line-height:1;font-weight:800;letter-spacing:-.8px}
 .brandText>span{display:inline;color:#2870c7}
