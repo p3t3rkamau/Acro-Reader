@@ -4,7 +4,7 @@ import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, ChevronLeft, ChevronRight, FileUp, History, Minus, Plus, RotateCcw, Search, X } from 'lucide-react';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import { getPdfJs } from '@/lib/pdf/pdfjs';
-import { renderAnnotationLinks } from '@/lib/pdf/annotations';
+import { diagnosePdfNavigation, renderAnnotationLinks } from '@/lib/pdf/annotations';
 import { renderSelectableText } from '@/lib/pdf/textLayer';
 import { getRecentDocument, listRecentDocuments, saveRecentDocument, type RecentDocument } from '@/lib/pdf/recentDocuments';
 import styles from './PDFViewer.module.scss';
@@ -148,6 +148,25 @@ export default function PDFViewer() {
       setSearchPages([]);
       setSearchPageIndex(0);
       setOutline((await loaded.getOutline()) ?? []);
+      // Temporary full-document scan to identify InDesign navigation buttons
+      // exported as PDF form widgets instead of Link annotations.
+      void diagnosePdfNavigation(loaded).then((report) => {
+        console.groupCollapsed('[AcroReader] PDF navigation diagnostic');
+        console.info('Annotation summary', {
+          pagesScanned: report.pagesScanned,
+          links: report.links,
+          linksWithDestinations: report.linksWithDestinations,
+          widgets: report.widgets,
+          pushButtons: report.pushButtons,
+          pushButtonsWithActions: report.pushButtonsWithActions,
+          pushButtonsWithoutActions: report.pushButtonsWithoutActions,
+          widgetsWithNavigationData: report.widgetsWithNavigationData,
+        });
+        if (report.widgetDetails.length) console.table(report.widgetDetails);
+        console.groupEnd();
+      }).catch((diagnosticError) => {
+        console.warn('[AcroReader] PDF navigation diagnostic failed.', diagnosticError);
+      });
       try { setRecentDocuments(await saveRecentDocument(file)); } catch (storageError) { console.warn('Could not save this PDF to recent documents.', storageError); }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'The PDF could not be opened.';
