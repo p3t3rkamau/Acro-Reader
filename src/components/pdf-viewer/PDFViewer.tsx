@@ -1,0 +1,190 @@
+'use client';
+
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { BookOpen, ChevronLeft, ChevronRight, FileUp, Minus, Plus, RotateCcw, Search, X } from 'lucide-react';
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
+import { getPdfJs } from '@/lib/pdf/pdfjs';
+import styles from './PDFViewer.module.scss';
+
+type PageState = 'idle' | 'loading' | 'ready' | 'error';
+
+export default function PDFViewer() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const renderTasks = useRef<Map<number, RenderTask>>(new Map());
+  const pdfRef = useRef<PDFDocumentProxy | null>(null);
+  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
+  const [fileName, setFileName] = useState('No document opened');
+  const [pageCount, setPageCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [zoom, setZoom] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [pageStates, setPageStates] = useState<Record<number, PageState>>({});
+  const [outline, setOutline] = useState<any[]>([]);
+  const [showOutline, setShowOutline] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const setPageState = useCallback((page: number, state: PageState) => {
+    setPageStates((previous) => ({ ...previous, [page]: state }));
+  }, []);
+
+  const cancelRenders = useCallback(() => {
+    renderTasks.current.forEach((task) => task.cancel());
+    renderTasks.current.clear();
+  }, []);
+
+  const renderPage = useCallback(async (document: PDFDocumentProxy, pageNumber: number) => {
+    const host = pageRefs.current.get(pageNumber);
+    if (!host || renderTasks.current.has(pageNumber)) return;
+    setPageState(pageNumber, 'loading');
+    try {
+      const page: PDFPageProxy = await document.getPage(pageNumber);
+      const baseViewport = page.getViewport({ scale: 1 });
+      const availableWidth = Math.max(280, Math.min(host.parentElement?.clientWidth ?? 900, 1100) - 40);
+      const fitScale = Math.min(1.5, availableWidth / baseViewport.width);
+      const viewport = page.getViewport({ scale: fitScale * zoom * Math.min(window.devicePixelRatio || 1, 2) });
+      const canvas = host.querySelector('canvas');
+      if (!canvas) return;
+      const context = canvas.getContext('2d', { alpha: false });
+      if (!context) throw new Error('Your browser could not create a canvas rendering context.');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      canvas.style.width = `${viewport.width / Math.min(window.devicePixelRatio || 1, 2)}px`;
+      canvas.style.height = `${viewport.height / Math.min(window.devicePixelRatio || 1, 2)}px`;
+      const task = page.render({ canvasContext: context, viewport, canvas } as Parameters<PDFPageProxy['render']>[0]);
+      renderTasks.current.set(pageNumber, task);
+      await task.promise;
+      setPageState(pageNumber, 'ready');
+    } catch (cause) {
+      if (cause instanceof Error && cause.name === 'RenderingCancelledException') return;
+      console.error(`Failed to render PDF page ${pageNumber}`, cause);
+      setPageState(pageNumber, 'error');
+    } finally {
+      renderTasks.current.delete(pageNumber);
+    }
+  }, [setPageState, zoom]);
+
+  const openPdf = useCallback(async (file: File) => {
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setError('Please choose a valid PDF file.');
+      return;
+    }
+    cancelRenders();
+    setLoading(true);
+    setError('');
+    setPdf(null);
+    pdfRef.current?.destroy();
+    try {
+      const pdfjs = await getPdfJs();
+      const data = new Uint8Array(await file.arrayBuffer());
+      const loaded = await pdfjs.getDocument({ data }).promise;
+      pdfRef.current = loaded;
+      setPdf(loaded);
+      setFileName(file.name);
+      setPageCount(loaded.numPages);
+      setCurrentPage(1);
+      setZoom(1);
+      setPageStates({});
+      setOutline((await loaded.getOutline()) ?? []);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'The PDF could not be opened.';
+      setError(message.includes('password') ? 'This PDF is password-protected. Password entry will be added in a later milestone.' : `Unable to open this PDF. ${message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [cancelRenders]);
+
+  useEffect(() => {
+    if (!pdf) return;
+    const nodes = Array.from(pageRefs.current.entries());
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const pageNumber = Number((entry.target as HTMLElement).dataset.page);
+        if (entry.isIntersecting) {
+          setCurrentPage(pageNumber);
+          void renderPage(pdf, pageNumber);
+          if (pageNumber > 1) void renderPage(pdf, pageNumber - 1);
+          if (pageNumber < pdf.numPages) void renderPage(pdf, pageNumber + 1);
+        }
+      });
+    }, { root: scrollerRef.current, rootMargin: '900px 0px', threshold: 0.01 });
+    nodes.forEach(([, node]) => observer.observe(node));
+    return () => observer.disconnect();
+  }, [pdf, renderPage, pageCount]);
+
+  useEffect(() => {
+    if (!pdf) return;
+    cancelRenders();
+    setPageStates({});
+    pageRefs.current.forEach((host) => {
+      const canvas = host.querySelector('canvas');
+      const context = canvas?.getContext('2d');
+      if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height);
+    });
+    const active = pageRefs.current.get(currentPage);
+    if (active) void renderPage(pdf, currentPage);
+  }, [zoom, pdf]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => {
+    cancelRenders();
+    pdfRef.current?.destroy();
+  }, [cancelRenders]);
+
+  const jumpToPage = (page: number) => {
+    const safePage = Math.max(1, Math.min(pageCount, page));
+    pageRefs.current.get(safePage)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setCurrentPage(safePage);
+  };
+
+  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) void openPdf(file);
+    event.target.value = '';
+  };
+
+  const changeZoom = (delta: number) => setZoom((value) => Math.max(0.5, Math.min(2.5, Number((value + delta).toFixed(2)))));
+
+  const searchInDocument = async () => {
+    if (!pdf || !searchTerm.trim()) return;
+    const term = searchTerm.toLocaleLowerCase();
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items.map((item: any) => 'str' in item ? item.str : '').join(' ').toLocaleLowerCase();
+      if (text.includes(term)) { jumpToPage(pageNumber); return; }
+    }
+    setError(`No match found for “${searchTerm}”.`);
+  };
+
+  return (
+    <main className={styles.appShell}>
+      <header className={styles.topbar}>
+        <div className={styles.brand}><span className={styles.brandMark}><BookOpen size={19} /></span><span>AcroReader</span></div>
+        <div className={styles.documentName} title={fileName}>{fileName}</div>
+        <div className={styles.headerActions}>
+          <button className={styles.iconButton} aria-label="Search document" onClick={() => setShowSearch((value) => !value)} disabled={!pdf}><Search size={18} /></button>
+          <button className={styles.iconButton} aria-label="Show bookmarks" onClick={() => setShowOutline((value) => !value)} disabled={!pdf}><BookOpen size={18} /></button>
+          <button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /><span>Open PDF</span></button>
+          <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={onFileChange} />
+        </div>
+      </header>
+
+      {showSearch && <div className={styles.searchBar}><Search size={17} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void searchInDocument()} placeholder="Search text in this PDF" /><button onClick={() => void searchInDocument()}>Find</button><button className={styles.iconButton} onClick={() => setShowSearch(false)} aria-label="Close search"><X size={16} /></button></div>}
+
+      <div className={styles.workspace}>
+        {showOutline && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Document outline<button className={styles.iconButton} onClick={() => setShowOutline(false)} aria-label="Close bookmarks"><X size={16} /></button></div>{outline.length ? outline.map((item, index) => <button className={styles.outlineItem} key={`${item.title}-${index}`} onClick={async () => { if (typeof item.dest === 'string') { const destination = await pdf?.getDestination(item.dest); if (destination && pdf) { const ref = destination[0]; const pageIndex = await pdf.getPageIndex(ref); jumpToPage(pageIndex + 1); } } }}>{item.title}</button>) : <p className={styles.muted}>This document has no bookmarks.</p>}</aside>}
+        <section className={styles.readerArea} ref={scrollerRef}>
+          {!pdf && !loading && <div className={styles.emptyState}><div className={styles.emptyIcon}><FileUp size={30} /></div><h1>Your documents, ready to explore.</h1><p>Open an interactive PDF to start reading. Your file stays in this browser session.</p><button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /> Open a PDF document</button><span className={styles.supportNote}>Best experienced on mobile, tablet and desktop.</span></div>}
+          {loading && <div className={styles.loadingState}><div className={styles.spinner} /><p>Opening your document…</p></div>}
+          {error && <div className={styles.errorBanner} role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
+          {pdf && Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <div className={styles.pageSlot} key={pageNumber} data-page={pageNumber} ref={(node) => { if (node) pageRefs.current.set(pageNumber, node); else pageRefs.current.delete(pageNumber); }}><div className={styles.pageLabel}>Page {pageNumber}</div><div className={styles.pageCanvas}><canvas aria-label={`PDF page ${pageNumber}`} />{pageStates[pageNumber] === 'loading' && <span className={styles.pageLoading}>Rendering page…</span>}{pageStates[pageNumber] === 'error' && <span className={styles.pageLoading}>This page could not be rendered.</span>}</div></div>)}
+        </section>
+      </div>
+
+      {pdf && <footer className={styles.controlbar}><div className={styles.pageControls}><button className={styles.iconButton} onClick={() => jumpToPage(currentPage - 1)} disabled={currentPage <= 1} aria-label="Previous page"><ChevronLeft size={18} /></button><input aria-label="Current page" type="number" min={1} max={pageCount} value={currentPage} onChange={(event) => jumpToPage(Number(event.target.value) || 1)} /><span>/ {pageCount}</span><button className={styles.iconButton} onClick={() => jumpToPage(currentPage + 1)} disabled={currentPage >= pageCount} aria-label="Next page"><ChevronRight size={18} /></button></div><div className={styles.zoomControls}><button className={styles.iconButton} onClick={() => changeZoom(-0.1)} aria-label="Zoom out"><Minus size={17} /></button><span>{Math.round(zoom * 100)}%</span><button className={styles.iconButton} onClick={() => changeZoom(0.1)} aria-label="Zoom in"><Plus size={17} /></button><button className={styles.iconButton} onClick={() => setZoom(1)} aria-label="Reset zoom"><RotateCcw size={16} /></button></div></footer>}
+    </main>
+  );
+}
