@@ -11,7 +11,7 @@ import styles from './PDFViewer.module.scss';
 
 type PageState = 'idle' | 'loading' | 'ready' | 'error';
 
-export default function PDFViewer() {
+export default function PDFViewer({ sourceUrl, documentTitle }: { sourceUrl?: string; documentTitle?: string } = {}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -119,8 +119,10 @@ export default function PDFViewer() {
     return work;
   }, [setPageState, zoom, activeSearchTerm]);
 
-  const openPdf = useCallback(async (file: File) => {
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+  const openPdf = useCallback(async (file: File | string) => {
+    const isRemote = typeof file === 'string';
+    const sourceName = isRemote ? (documentTitle || file.split('/').pop() || 'Online document.pdf') : file.name;
+    if (!isRemote && file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       setError('Please choose a valid PDF file.');
       return;
     }
@@ -135,12 +137,14 @@ export default function PDFViewer() {
       await previousDocument?.destroy();
       if (generation !== documentGeneration.current) return;
       const pdfjs = await getPdfJs();
-      const data = new Uint8Array(await file.arrayBuffer());
-      const loaded = await pdfjs.getDocument({ data }).promise;
+      const loadingTask = isRemote
+        ? pdfjs.getDocument({ url: file, withCredentials: false })
+        : pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+      const loaded = await loadingTask.promise;
       if (generation !== documentGeneration.current) { await loaded.destroy(); return; }
       pdfRef.current = loaded;
       setPdf(loaded);
-      setFileName(file.name);
+      setFileName(sourceName);
       setPageCount(loaded.numPages);
       setCurrentPage(1);
       setZoom(1);
@@ -181,14 +185,21 @@ export default function PDFViewer() {
       }).catch((diagnosticError) => {
         console.warn('[AcroReader] PDF navigation diagnostic failed.', diagnosticError);
       });
-      try { setRecentDocuments(await saveRecentDocument(file)); } catch (storageError) { console.warn('Could not save this PDF to recent documents.', storageError); }
+      if (!isRemote) {
+        try { setRecentDocuments(await saveRecentDocument(file)); } catch (storageError) { console.warn('Could not save this PDF to recent documents.', storageError); }
+      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'The PDF could not be opened.';
       setError(message.includes('password') ? 'This PDF is password-protected. Password entry will be added in a later milestone.' : `Unable to open this PDF. ${message}`);
     } finally {
       if (generation === documentGeneration.current) setLoading(false);
     }
-  }, [cancelRenders]);
+  }, [cancelRenders, documentTitle]);
+
+  useEffect(() => {
+    if (!sourceUrl) return;
+    void openPdf(sourceUrl);
+  }, [sourceUrl, openPdf]);
 
   useEffect(() => {
     if (!pdf) return;
