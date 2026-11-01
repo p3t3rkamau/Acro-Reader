@@ -69,3 +69,28 @@ export async function getRecentDocument(id: string): Promise<File | null> {
   if (!record) return null;
   return new File([record.blob], record.name, { type: 'application/pdf', lastModified: record.lastOpened });
 }
+
+
+export async function deleteRecentDocument(id: string): Promise<void> {
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    transaction.objectStore(STORE_NAME).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+  db.close();
+}
+
+export async function clearRecentDocuments(): Promise<void> {
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    transaction.objectStore(STORE_NAME).clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+  db.close();
+}
