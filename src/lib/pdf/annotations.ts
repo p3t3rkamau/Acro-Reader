@@ -1,7 +1,6 @@
 'use client';
 
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
-import type { PageViewport } from 'pdfjs-dist';
 
 type NavigateToPage = (pageNumber: number) => void;
 
@@ -14,7 +13,7 @@ export async function renderAnnotationLinks(
   layer: HTMLDivElement,
   page: PDFPageProxy,
   document: PDFDocumentProxy,
-  viewport: PageViewport,
+  viewport: ReturnType<PDFPageProxy['getViewport']>,
   navigateToPage: NavigateToPage,
 ) {
   layer.replaceChildren();
