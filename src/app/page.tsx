@@ -1,5 +1,5 @@
-import PDFViewer from '@/components/pdf-viewer/PDFViewer';
+import DocumentLibrary from '@/components/library/DocumentLibrary';
 
 export default function HomePage() {
-  return <PDFViewer />;
+  return <DocumentLibrary />;
 }
