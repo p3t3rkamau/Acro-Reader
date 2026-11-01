@@ -133,9 +133,26 @@ export async function renderAnnotationLinks(
           const pageIndex = typeof pageReference === 'number'
             ? pageReference
             : await document.getPageIndex(pageReference);
+          const targetPage = pageIndex + 1;
+
+          console.info('[AcroReader] PDF navigation click', {
+            sourcePage: page.pageNumber,
+            button: annotation.fieldName || annotation.title,
+            destinationName: typeof annotation.dest === 'string' ? annotation.dest : undefined,
+            pageReference: typeof pageReference === 'object' && pageReference !== null && 'toString' in pageReference
+              ? String(pageReference)
+              : pageReference,
+            resolvedPage: targetPage,
+          });
 
           if (Number.isInteger(pageIndex) && pageIndex >= 0 && pageIndex < document.numPages) {
-            navigateToPage(pageIndex + 1);
+            navigateToPage(targetPage);
+          } else {
+            console.warn('[AcroReader] Resolved destination is outside this PDF.', {
+              destination: annotation.dest,
+              pageIndex,
+              pageCount: document.numPages,
+            });
           }
         } catch (error) {
           console.error('Unable to resolve PDF Go To destination.', error);
@@ -168,6 +185,8 @@ export type PdfNavigationDiagnostic = {
     dest?: unknown;
     url?: string;
     rect?: number[];
+    resolvedPage?: number;
+    destinationError?: string;
   }>;
 };
 
@@ -241,6 +260,35 @@ export async function diagnosePdfNavigation(
         report.widgetsWithNavigationData += 1;
       }
 
+      let resolvedPage: number | undefined;
+      let destinationError: string | undefined;
+      if (typeof annotation.dest === 'string') {
+        try {
+          const resolved = await document.getDestination(annotation.dest);
+          if (resolved?.length) {
+            const pageRef = resolved[0];
+            const index = typeof pageRef === 'number'
+              ? pageRef
+              : await document.getPageIndex(pageRef);
+            resolvedPage = index + 1;
+          } else {
+            destinationError = 'Named destination was not found';
+          }
+        } catch (error) {
+          destinationError = error instanceof Error ? error.message : String(error);
+        }
+      } else if (Array.isArray(annotation.dest) && annotation.dest.length) {
+        try {
+          const pageRef = annotation.dest[0];
+          const index = typeof pageRef === 'number'
+            ? pageRef
+            : await document.getPageIndex(pageRef);
+          resolvedPage = index + 1;
+        } catch (error) {
+          destinationError = error instanceof Error ? error.message : String(error);
+        }
+      }
+
       report.widgetDetails.push({
         page: pageNumber,
         id: annotation.id,
@@ -253,7 +301,9 @@ export async function diagnosePdfNavigation(
         dest: annotation.dest,
         url: annotation.url,
         rect: annotation.rect,
-      });
+        resolvedPage,
+        destinationError,
+      } as PdfNavigationDiagnostic['widgetDetails'][number]);
     }
   }
 
