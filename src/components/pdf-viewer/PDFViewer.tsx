@@ -58,12 +58,18 @@ export default function PDFViewer() {
       canvas.height = Math.floor(renderViewport.height);
       canvas.style.width = `${cssViewport.width}px`;
       canvas.style.height = `${cssViewport.height}px`;
-      annotationLayer.style.width = `${cssViewport.width}px`;
-      annotationLayer.style.height = `${cssViewport.height}px`;
       const task = page.render({ canvasContext: context, viewport: renderViewport, canvas } as Parameters<PDFPageProxy['render']>[0]);
       renderTasks.current.set(pageNumber, task);
       await task.promise;
-      await renderAnnotationLinks(annotationLayer, page, document, cssViewport, (targetPage) => {
+      // The canvas may be constrained by the mobile viewport at high zoom.
+      // Match the link layer to its final on-screen size, not its requested size.
+      const displayedWidth = canvas.clientWidth || cssViewport.width;
+      const displayedHeight = canvas.clientHeight || cssViewport.height;
+      const annotationScale = displayedWidth / cssViewport.width;
+      const annotationViewport = page.getViewport({ scale: fitScale * zoom * annotationScale });
+      annotationLayer.style.width = `${displayedWidth}px`;
+      annotationLayer.style.height = `${displayedHeight}px`;
+      await renderAnnotationLinks(annotationLayer, page, document, annotationViewport, (targetPage) => {
         const safePage = Math.max(1, Math.min(document.numPages, targetPage));
         pageRefs.current.get(safePage)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         setCurrentPage(safePage);
