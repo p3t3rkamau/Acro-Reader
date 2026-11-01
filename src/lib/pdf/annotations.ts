@@ -17,13 +17,29 @@ type LinkAnnotation = {
   newWindow?: boolean;
   dest?: string | PdfDestination | null;
   action?: string | null;
+  fieldType?: string;
+  fieldName?: string;
 };
 
 const PDFJS_LINK_ANNOTATION_TYPE = 2;
+const PDFJS_WIDGET_ANNOTATION_TYPE = 20;
 
 function isLinkAnnotation(annotation: LinkAnnotation): boolean {
   return annotation.annotationType === PDFJS_LINK_ANNOTATION_TYPE ||
     annotation.subtype === 'Link';
+}
+
+/**
+ * InDesign can export Go To Destination buttons as Widget annotations.
+ * PDF.js exposes the named destination on these widgets as annotation.dest,
+ * even though annotation.actions is empty and no action dictionary is present.
+ */
+function isWidgetNavigationAnnotation(annotation: LinkAnnotation): boolean {
+  const isWidget = annotation.annotationType === PDFJS_WIDGET_ANNOTATION_TYPE ||
+    annotation.subtype === 'Widget';
+  return isWidget && annotation.fieldType === 'Btn' &&
+    (typeof annotation.dest === 'string' ||
+      (Array.isArray(annotation.dest) && annotation.dest.length > 0));
 }
 
 async function resolveInternalDestination(
@@ -61,7 +77,9 @@ export async function renderAnnotationLinks(
 
   for (const rawAnnotation of annotations) {
     const annotation = rawAnnotation as typeof rawAnnotation & LinkAnnotation;
-    if (!isLinkAnnotation(annotation) || !Array.isArray(annotation.rect)) continue;
+    const isLink = isLinkAnnotation(annotation);
+    const isWidgetNavigation = isWidgetNavigationAnnotation(annotation);
+    if ((!isLink && !isWidgetNavigation) || !Array.isArray(annotation.rect)) continue;
 
     const bounds = viewport.convertToViewportRectangle(annotation.rect);
     const left = Math.max(0, Math.min(bounds[0], bounds[2]));
@@ -79,9 +97,12 @@ export async function renderAnnotationLinks(
     anchor.style.top = `${top}px`;
     anchor.style.width = `${width}px`;
     anchor.style.height = `${height}px`;
-    anchor.setAttribute('aria-label', annotation.title || 'PDF navigation link');
+    anchor.setAttribute(
+      'aria-label',
+      annotation.title || annotation.fieldName || 'PDF navigation button',
+    );
 
-    const externalUrl = annotation.url || annotation.unsafeUrl;
+    const externalUrl = isLink ? annotation.url || annotation.unsafeUrl : null;
     if (typeof externalUrl === 'string' && externalUrl.length > 0) {
       anchor.href = externalUrl;
       anchor.target = annotation.newWindow ? '_blank' : '_self';
