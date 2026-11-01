@@ -177,7 +177,7 @@ export default function PDFViewer() {
     const active = pageRefs.current.get(currentPage);
     if (active) void renderPage(pdf, currentPage);
     })();
-  }, [zoom, pdf, cancelRenders, currentPage, renderPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [zoom, pdf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     void listRecentDocuments().then(setRecentDocuments).catch((cause) => console.warn('Recent documents are unavailable.', cause));
