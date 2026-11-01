@@ -29,7 +29,7 @@ Open http://localhost:3000.
 - Basic text extraction search (first matching page)
 
 ## Important compatibility note
-This is the first development milestone, not a completed Acrobat replacement. The current renderer uses PDF.js canvas rendering. Annotation-layer rendering, text selection/highlight overlays, named destinations, all PDF link actions, form widgets, password entry, robust virtualization, pinch gestures, print/share, and a tested compatibility report are still to be implemented. PDF.js does not execute arbitrary Acrobat JavaScript or guarantee support for InDesign multimedia/animation exports.
+This is the first development milestone, not a completed Acrobat replacement. The current renderer uses PDF.js canvas rendering plus a lightweight accessible overlay for standard link annotations and internal destinations. Text selection/highlight overlays, full PDF action coverage, form widgets, password entry, robust virtualization, pinch gestures, print/share, and a tested compatibility report are still to be implemented. PDF.js does not execute arbitrary Acrobat JavaScript or guarantee support for InDesign multimedia/animation exports.
 
 ## Next milestones
 1. Add PDF.js text selection and text-layer search highlighting.
