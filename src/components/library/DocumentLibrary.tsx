@@ -91,7 +91,7 @@ export default function DocumentLibrary({ path = [] }: Props) {
         <section className={styles.hero}>
           <div className={styles.heroContent}>
             <span className={styles.eyebrow}><span /> AVIATION DOCUMENT PORTAL</span>
-            <h1>{path.length === 0 ? <>Your aviation library.<br /><span>Clear, current, accessible.</span></> : folder.title}</h1>
+            <h1>{path.length === 0 ? 'Your aviation library.' : folder.title}{path.length === 0 && <><br /><span>Clear, current, accessible.</span></>}</h1>
             <p>{folder.description}</p>
             {path.length === 0 && (
               <div className={styles.heroActions}>
