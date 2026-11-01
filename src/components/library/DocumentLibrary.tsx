@@ -111,7 +111,7 @@ export default function DocumentLibrary({ path = [] }: Props) {
                     {document.status === 'current' ? 'Current' : 'Superseded'}
                   </span>
                   <ArrowRight size={18} />
-                </a>
+                </Link>
               ))}
             </div>
           </section>
