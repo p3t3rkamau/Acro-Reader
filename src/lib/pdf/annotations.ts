@@ -125,3 +125,117 @@ export async function renderAnnotationLinks(
     layer.appendChild(anchor);
   }
 }
+
+export type PdfNavigationDiagnostic = {
+  pagesScanned: number;
+  links: number;
+  linksWithDestinations: number;
+  widgets: number;
+  pushButtons: number;
+  pushButtonsWithActions: number;
+  pushButtonsWithoutActions: number;
+  widgetsWithNavigationData: number;
+  widgetDetails: Array<{
+    page: number;
+    id?: string;
+    fieldName?: string;
+    fieldType?: string;
+    annotationType?: number;
+    subtype?: string;
+    actionNames: string[];
+    action?: unknown;
+    dest?: unknown;
+    url?: string;
+    rect?: number[];
+  }>;
+};
+
+/**
+ * Scans every page for PDF link and widget annotations.
+ * This is diagnostic only: it does not change the PDF or its annotations.
+ */
+export async function diagnosePdfNavigation(
+  document: PDFDocumentProxy,
+): Promise<PdfNavigationDiagnostic> {
+  const report: PdfNavigationDiagnostic = {
+    pagesScanned: 0,
+    links: 0,
+    linksWithDestinations: 0,
+    widgets: 0,
+    pushButtons: 0,
+    pushButtonsWithActions: 0,
+    pushButtonsWithoutActions: 0,
+    widgetsWithNavigationData: 0,
+    widgetDetails: [],
+  };
+
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber);
+    const annotations = await page.getAnnotations({ intent: 'display' });
+    report.pagesScanned += 1;
+
+    for (const raw of annotations) {
+      const annotation = raw as typeof raw & {
+        annotationType?: number;
+        subtype?: string;
+        id?: string;
+        fieldName?: string;
+        fieldType?: string;
+        fieldFlags?: number;
+        actions?: Record<string, unknown> | null;
+        action?: unknown;
+        dest?: unknown;
+        url?: string;
+        rect?: number[];
+        pushButton?: boolean;
+      };
+
+      if (isLinkAnnotation(annotation)) {
+        report.links += 1;
+        if (annotation.dest || annotation.url) report.linksWithDestinations += 1;
+        continue;
+      }
+
+      const isWidget = annotation.annotationType === 20 ||
+        annotation.subtype === 'Widget' ||
+        typeof annotation.fieldType === 'string';
+      if (!isWidget) continue;
+
+      report.widgets += 1;
+      const actionNames = annotation.actions && typeof annotation.actions === 'object'
+        ? Object.keys(annotation.actions)
+        : [];
+      const isPushButton = annotation.pushButton === true ||
+        (annotation.fieldType === 'Btn' && (typeof annotation.fieldFlags === 'number'
+          ? (annotation.fieldFlags & 65536) !== 0
+          : false));
+
+      if (isPushButton) {
+        report.pushButtons += 1;
+        if (actionNames.length > 0 || annotation.action) report.pushButtonsWithActions += 1;
+        else report.pushButtonsWithoutActions += 1;
+      }
+
+      if (annotation.dest || annotation.url || annotation.action || actionNames.length > 0) {
+        report.widgetsWithNavigationData += 1;
+      }
+
+      report.widgetDetails.push({
+        page: pageNumber,
+        id: annotation.id,
+        fieldName: annotation.fieldName,
+        fieldType: annotation.fieldType,
+        annotationType: annotation.annotationType,
+        subtype: annotation.subtype,
+        actionNames,
+        action: annotation.action,
+        dest: annotation.dest,
+        url: annotation.url,
+        rect: annotation.rect,
+      });
+    }
+  }
+
+  return report;
+}
+
