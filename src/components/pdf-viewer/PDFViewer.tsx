@@ -11,14 +11,6 @@ import styles from './PDFViewer.module.scss';
 
 type PageState = 'idle' | 'loading' | 'ready' | 'error';
 
-type PinchStart = { distance: number; zoom: number };
-
-function getTouchDistance(touches: React.TouchList): number {
-  const first = touches[0];
-  const second = touches[1];
-  return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
-}
-
 export default function PDFViewer() {
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -27,7 +19,6 @@ export default function PDFViewer() {
   const renderPromises = useRef<Map<number, Promise<void>>>(new Map());
   const documentGeneration = useRef(0);
   const renderEpoch = useRef(0);
-  const pinchStart = useRef<PinchStart | null>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [fileName, setFileName] = useState('No document opened');
@@ -234,6 +225,51 @@ export default function PDFViewer() {
   }, [zoom, pdf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const element = scrollerRef.current;
+    if (!element) return;
+
+    let startDistance = 0;
+    let startZoom = 1;
+
+    const distanceBetweenTouches = (touches: TouchList) => {
+      const first = touches[0];
+      const second = touches[1];
+      return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        startDistance = distanceBetweenTouches(event.touches);
+        startZoom = zoom;
+      }
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (event.touches.length !== 2 || startDistance <= 0) return;
+      event.preventDefault();
+      const scale = distanceBetweenTouches(event.touches) / startDistance;
+      const nextZoom = Math.max(0.5, Math.min(2.5, startZoom * scale));
+      setZoom(Number(nextZoom.toFixed(2)));
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length < 2) startDistance = 0;
+    };
+
+    element.addEventListener('touchstart', onTouchStart, { passive: true });
+    element.addEventListener('touchmove', onTouchMove, { passive: false });
+    element.addEventListener('touchend', onTouchEnd, { passive: true });
+    element.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+    return () => {
+      element.removeEventListener('touchstart', onTouchStart);
+      element.removeEventListener('touchmove', onTouchMove);
+      element.removeEventListener('touchend', onTouchEnd);
+      element.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [zoom]);
+
+  useEffect(() => {
     void listRecentDocuments().then(setRecentDocuments).catch((cause) => console.warn('Recent documents are unavailable.', cause));
     return () => {
       documentGeneration.current += 1;
@@ -262,27 +298,6 @@ export default function PDFViewer() {
   };
 
   const changeZoom = (delta: number) => setZoom((value) => Math.max(0.5, Math.min(2.5, Number((value + delta).toFixed(2)))));
-
-  const handleTouchStart = (event: React.TouchEvent<HTMLElement>) => {
-    if (event.touches.length === 2) {
-      pinchStart.current = {
-        distance: getTouchDistance(event.touches),
-        zoom,
-      };
-    }
-  };
-
-  const handleTouchMove = (event: React.TouchEvent<HTMLElement>) => {
-    if (event.touches.length !== 2 || !pinchStart.current) return;
-    event.preventDefault();
-    const scale = getTouchDistance(event.touches) / pinchStart.current.distance;
-    const nextZoom = Math.max(0.5, Math.min(2.5, pinchStart.current.zoom * scale));
-    setZoom(Number(nextZoom.toFixed(2)));
-  };
-
-  const handleTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
-    if (event.touches.length < 2) pinchStart.current = null;
-  };
 
   const removeRecent = async (id: string) => {
     if (!window.confirm('Remove this PDF from recent documents on this device?')) return;
@@ -347,7 +362,7 @@ export default function PDFViewer() {
 
       <div className={styles.workspace}>
         {showRecent && <aside className={styles.outlinePanel}><div className={styles.panelHeading}><span>Recent documents</span><span className={styles.panelActions}>{recentDocuments.length > 0 && <button className={styles.clearRecentButton} onClick={() => void removeAllRecent()}>Clear all</button>}<button className={styles.iconButton} onClick={() => setShowRecent(false)} aria-label="Close recent documents"><X size={16} /></button></span></div>{recentDocuments.length ? recentDocuments.map((item) => <div className={styles.recentItemRow} key={item.id}><button className={styles.recentItem} onClick={() => { setShowRecent(false); void openRecent(item.id); }}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleString()}</small></span></button><button className={styles.deleteRecentButton} onClick={() => void removeRecent(item.id)} aria-label={`Delete ${item.name}`} title="Delete from this device"><Trash2 size={16} /></button></div>) : <p className={styles.muted}>PDFs you open on this device will appear here.</p>}</aside>}{showOutline && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Document outline<button className={styles.iconButton} onClick={() => setShowOutline(false)} aria-label="Close bookmarks"><X size={16} /></button></div>{outline.length ? outline.map((item, index) => <button className={styles.outlineItem} key={`${item.title}-${index}`} onClick={async () => { if (typeof item.dest === 'string') { const destination = await pdf?.getDestination(item.dest); if (destination && pdf) { const ref = destination[0]; const pageIndex = await pdf.getPageIndex(ref); jumpToPage(pageIndex + 1); } } }}>{item.title}</button>) : <p className={styles.muted}>This document has no bookmarks.</p>}</aside>}
-        <section className={styles.readerArea} ref={scrollerRef} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+        <section className={styles.readerArea} ref={scrollerRef}>
           {!pdf && !loading && <div className={styles.emptyState}><div className={styles.emptyIcon}><FileUp size={30} /></div><h1>Your documents, ready to explore.</h1><p>Open an interactive PDF to start reading. Recent files are saved privately in this browser on this device.</p><button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /> Browse device files</button>{recentDocuments.length > 0 && <div className={styles.recentSection}><h2>Recent documents</h2>{recentDocuments.map((item) => <div className={styles.recentItemRow} key={item.id}><button className={styles.recentItem} onClick={() => void openRecent(item.id)}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleDateString()} · {(item.size / 1024 / 1024).toFixed(1)} MB</small></span></button><button className={styles.deleteRecentButton} onClick={() => void removeRecent(item.id)} aria-label={`Delete ${item.name}`} title="Delete from this device"><Trash2 size={16} /></button></div>)}</div>}<span className={styles.supportNote}>On phones and tablets, Browse opens your device’s file picker.</span></div>}
           {loading && <div className={styles.loadingState}><div className={styles.spinner} /><p>Opening your document…</p></div>}
           {error && <div className={styles.errorBanner} role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
