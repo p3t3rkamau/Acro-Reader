@@ -26,17 +26,21 @@ Open http://localhost:3000.
 - PDF.js link annotation hit areas with mouse, touch and keyboard access
 - Internal page navigation for direct and named PDF destinations
 - External PDF links with safe new-window handling when requested by the PDF
-- Basic text extraction search (first matching page)
+- Selectable text overlay generated from PDF.js text content
+- Text selection and copy support for selectable PDF text
+- Search highlighting for matches contained within individual PDF text items
+- Search navigation between matching pages
+- Basic text extraction search
 - Recent-document library stored locally in IndexedDB (up to 12 shown)
 - Reopen recent PDFs without browsing for the file again
 - Native browser file picker for local PDF selection on desktop, iOS/iPadOS and Android browsers
 - Render-task cancellation, cancellation settling, and document-generation guards when switching PDFs
 
 ## Important compatibility note
-This is the first development milestone, not a completed Acrobat replacement. The current renderer uses PDF.js canvas rendering plus a lightweight accessible overlay for standard link annotations and internal destinations. Text selection/highlight overlays, full PDF action coverage, form widgets, password entry, robust virtualization, pinch gestures, print/share, and a tested compatibility report are still to be implemented. Recent documents are stored in the current browser's local IndexedDB; they are not synced between devices and may be cleared by the browser or operating system. PDF.js does not execute arbitrary Acrobat JavaScript or guarantee support for InDesign multimedia/animation exports.
+This is the first development milestone, not a completed Acrobat replacement. The current renderer uses PDF.js canvas rendering plus a lightweight accessible overlay for standard link annotations and internal destinations. Advanced text layout fidelity, matches spanning multiple PDF text items, full PDF action coverage, form widgets, password entry, robust virtualization, pinch gestures, print/share, and a tested compatibility report are still to be implemented. Recent documents are stored in the current browser's local IndexedDB; they are not synced between devices and may be cleared by the browser or operating system. PDF.js does not execute arbitrary Acrobat JavaScript or guarantee support for InDesign multimedia/animation exports.
 
 ## Next milestones
-1. Add PDF.js text selection and text-layer search highlighting.
+1. Improve text-layer alignment across rotated pages, mixed fonts and constrained mobile widths; add cross-text-item search matches.
 2. Add robust virtualized page mounting and continue hardening render-task cancellation on scroll/zoom/document switches.
 3. Improve bookmark destination resolution for all destination forms and nested outlines.
 4. Add search result navigation and highlighting.
