@@ -5,6 +5,7 @@ import { BookOpen, ChevronLeft, ChevronRight, FileUp, History, Minus, Plus, Rota
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import { getPdfJs } from '@/lib/pdf/pdfjs';
 import { renderAnnotationLinks } from '@/lib/pdf/annotations';
+import { renderSelectableText } from '@/lib/pdf/textLayer';
 import { getRecentDocument, listRecentDocuments, saveRecentDocument, type RecentDocument } from '@/lib/pdf/recentDocuments';
 import styles from './PDFViewer.module.scss';
 
@@ -32,6 +33,9 @@ export default function PDFViewer() {
   const [showRecent, setShowRecent] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeSearchTerm, setActiveSearchTerm] = useState('');
+  const [searchPages, setSearchPages] = useState<number[]>([]);
+  const [searchPageIndex, setSearchPageIndex] = useState(0);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
 
   const setPageState = useCallback((page: number, state: PageState) => {
@@ -67,7 +71,8 @@ export default function PDFViewer() {
       const renderViewport = page.getViewport({ scale: fitScale * zoom * outputScale });
       const canvas = host.querySelector('canvas');
       const annotationLayer = host.querySelector<HTMLDivElement>('[data-annotation-layer]');
-      if (!canvas || !annotationLayer) return;
+      const textLayer = host.querySelector<HTMLDivElement>('[data-text-layer]');
+      if (!canvas || !annotationLayer || !textLayer) return;
       const context = canvas.getContext('2d', { alpha: false });
       if (!context) throw new Error('Your browser could not create a canvas rendering context.');
       canvas.width = Math.floor(renderViewport.width);
@@ -86,6 +91,9 @@ export default function PDFViewer() {
       const annotationViewport = page.getViewport({ scale: fitScale * zoom * annotationScale });
       annotationLayer.style.width = `${displayedWidth}px`;
       annotationLayer.style.height = `${displayedHeight}px`;
+      textLayer.style.width = `${displayedWidth}px`;
+      textLayer.style.height = `${displayedHeight}px`;
+      await renderSelectableText(page, annotationViewport, textLayer, activeSearchTerm);
       await renderAnnotationLinks(annotationLayer, page, document, annotationViewport, (targetPage) => {
         const safePage = Math.max(1, Math.min(document.numPages, targetPage));
         pageRefs.current.get(safePage)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -107,7 +115,7 @@ export default function PDFViewer() {
       if (renderPromises.current.get(pageNumber) === work) renderPromises.current.delete(pageNumber);
     });
     return work;
-  }, [setPageState, zoom]);
+  }, [setPageState, zoom, activeSearchTerm]);
 
   const openPdf = useCallback(async (file: File) => {
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
@@ -211,14 +219,26 @@ export default function PDFViewer() {
 
   const searchInDocument = async () => {
     if (!pdf || !searchTerm.trim()) return;
-    const term = searchTerm.toLocaleLowerCase();
+    const term = searchTerm.trim().toLocaleLowerCase();
+    const pages: number[] = [];
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
-      const text = content.items.map((item: any) => 'str' in item ? item.str : '').join(' ').toLocaleLowerCase();
-      if (text.includes(term)) { jumpToPage(pageNumber); return; }
+      const pageText = content.items.map((item: any) => 'str' in item ? item.str : '').join(' ').toLocaleLowerCase();
+      if (pageText.includes(term)) pages.push(pageNumber);
     }
-    setError(`No match found for “${searchTerm}”.`);
+    setSearchPages(pages);
+    setSearchPageIndex(0);
+    setActiveSearchTerm(searchTerm.trim());
+    if (pages.length) jumpToPage(pages[0]);
+    else setError(`No match found for “${searchTerm}”.`);
+  };
+
+  const moveSearchResult = (direction: -1 | 1) => {
+    if (!searchPages.length) return;
+    const next = (searchPageIndex + direction + searchPages.length) % searchPages.length;
+    setSearchPageIndex(next);
+    jumpToPage(searchPages[next]);
   };
 
   return (
@@ -234,7 +254,7 @@ export default function PDFViewer() {
         </div>
       </header>
 
-      {showSearch && <div className={styles.searchBar}><Search size={17} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void searchInDocument()} placeholder="Search text in this PDF" /><button onClick={() => void searchInDocument()}>Find</button><button className={styles.iconButton} onClick={() => setShowSearch(false)} aria-label="Close search"><X size={16} /></button></div>}
+      {showSearch && <div className={styles.searchBar}><Search size={17} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void searchInDocument()} placeholder="Search text in this PDF" /><button onClick={() => void searchInDocument()}>Find</button>{searchPages.length > 0 && <><span className={styles.searchCount}>{searchPageIndex + 1} / {searchPages.length} pages</span><button onClick={() => moveSearchResult(-1)} aria-label="Previous search result">↑</button><button onClick={() => moveSearchResult(1)} aria-label="Next search result">↓</button></>}<button className={styles.iconButton} onClick={() => setShowSearch(false)} aria-label="Close search"><X size={16} /></button></div>}
 
       <div className={styles.workspace}>
         {showRecent && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Recent documents<button className={styles.iconButton} onClick={() => setShowRecent(false)} aria-label="Close recent documents"><X size={16} /></button></div>{recentDocuments.length ? recentDocuments.map((item) => <button className={styles.recentItem} key={item.id} onClick={() => { setShowRecent(false); void openRecent(item.id); }}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleString()}</small></span></button>) : <p className={styles.muted}>PDFs you open on this device will appear here.</p>}</aside>}{showOutline && <aside className={styles.outlinePanel}><div className={styles.panelHeading}>Document outline<button className={styles.iconButton} onClick={() => setShowOutline(false)} aria-label="Close bookmarks"><X size={16} /></button></div>{outline.length ? outline.map((item, index) => <button className={styles.outlineItem} key={`${item.title}-${index}`} onClick={async () => { if (typeof item.dest === 'string') { const destination = await pdf?.getDestination(item.dest); if (destination && pdf) { const ref = destination[0]; const pageIndex = await pdf.getPageIndex(ref); jumpToPage(pageIndex + 1); } } }}>{item.title}</button>) : <p className={styles.muted}>This document has no bookmarks.</p>}</aside>}
@@ -242,7 +262,7 @@ export default function PDFViewer() {
           {!pdf && !loading && <div className={styles.emptyState}><div className={styles.emptyIcon}><FileUp size={30} /></div><h1>Your documents, ready to explore.</h1><p>Open an interactive PDF to start reading. Recent files are saved privately in this browser on this device.</p><button className={styles.openButton} onClick={() => inputRef.current?.click()}><FileUp size={17} /> Browse device files</button>{recentDocuments.length > 0 && <div className={styles.recentSection}><h2>Recent documents</h2>{recentDocuments.map((item) => <button className={styles.recentItem} key={item.id} onClick={() => void openRecent(item.id)}><span className={styles.recentIcon}><BookOpen size={17} /></span><span className={styles.recentDetails}><strong>{item.name}</strong><small>{new Date(item.lastOpened).toLocaleDateString()} · {(item.size / 1024 / 1024).toFixed(1)} MB</small></span></button>)}</div>}<span className={styles.supportNote}>On phones and tablets, Browse opens your device’s file picker.</span></div>}
           {loading && <div className={styles.loadingState}><div className={styles.spinner} /><p>Opening your document…</p></div>}
           {error && <div className={styles.errorBanner} role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
-          {pdf && Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <div className={styles.pageSlot} key={pageNumber} data-page={pageNumber} ref={(node) => { if (node) pageRefs.current.set(pageNumber, node); else pageRefs.current.delete(pageNumber); }}><div className={styles.pageLabel}>Page {pageNumber}</div><div className={styles.pageCanvas}><canvas aria-label={`PDF page ${pageNumber}`} /><div className={styles.annotationLayer} data-annotation-layer aria-label={`Interactive links on page ${pageNumber}`} />{pageStates[pageNumber] === 'loading' && <span className={styles.pageLoading}>Rendering page…</span>}{pageStates[pageNumber] === 'error' && <span className={styles.pageLoading}>This page could not be rendered.</span>}</div></div>)}
+          {pdf && Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <div className={styles.pageSlot} key={pageNumber} data-page={pageNumber} ref={(node) => { if (node) pageRefs.current.set(pageNumber, node); else pageRefs.current.delete(pageNumber); }}><div className={styles.pageLabel}>Page {pageNumber}</div><div className={styles.pageCanvas}><canvas aria-label={`PDF page ${pageNumber}`} /><div className={styles.textLayer} data-text-layer aria-label={`Selectable text on page ${pageNumber}`} /><div className={styles.annotationLayer} data-annotation-layer aria-label={`Interactive links on page ${pageNumber}`} />{pageStates[pageNumber] === 'loading' && <span className={styles.pageLoading}>Rendering page…</span>}{pageStates[pageNumber] === 'error' && <span className={styles.pageLoading}>This page could not be rendered.</span>}</div></div>)}
         </section>
       </div>
 
