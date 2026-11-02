@@ -57,8 +57,8 @@ function ensureFolderPath(root: LibraryFolder, aircraft: string, nodes: PayloadF
       }
       current.folders.push(next)
       current.folders.sort((a, b) => {
-        const aOrder = nodes.find((item) => item.slug === a.slug)?.sortOrder ?? 0
-        const bOrder = nodes.find((item) => item.slug === b.slug)?.sortOrder ?? 0
+        const aOrder = nodes.find((item) => item.slug === a.slug)?.sortOrder ?? Number.MAX_SAFE_INTEGER
+        const bOrder = nodes.find((item) => item.slug === b.slug)?.sortOrder ?? Number.MAX_SAFE_INTEGER
         return aOrder - bOrder || a.title.localeCompare(b.title)
       })
     }
