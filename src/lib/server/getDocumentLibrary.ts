@@ -2,18 +2,28 @@ import 'server-only'
 
 import { documentLibrary, type LibraryDocument, type LibraryFolder } from '@/data/documentLibrary'
 
+type PayloadFolderNode = {
+  slug: string
+  title: string
+  description?: string | null
+  sortOrder?: number
+}
+
 type PayloadMedia = {
   url?: string | null
+  filename?: string | null
 }
 
 type PayloadDocument = {
   id: string | number
   title: string
+  documentNumber?: string
   revision: string
   effectiveDate: string
-  status: 'published' | 'superseded' | 'draft'
+  status: 'published' | 'superseded'
   aircraft: string
   folderPath?: string
+  folderNodes?: PayloadFolderNode[]
   pdfFile?: PayloadMedia | string | number | null
 }
 
@@ -29,30 +39,49 @@ function cloneFolder(folder: LibraryFolder): LibraryFolder {
   }
 }
 
-function findFolder(root: LibraryFolder, path: string[]): LibraryFolder | null {
-  let current: LibraryFolder | undefined = root
-  for (const segment of path) {
-    current = current.folders?.find((folder) => folder.slug === segment)
-    if (!current) return null
+function ensureFolderPath(root: LibraryFolder, aircraft: string, nodes: PayloadFolderNode[]) {
+  let current = root.folders?.find((folder) => folder.slug === aircraft)
+  if (!current) return null
+
+  for (const node of nodes) {
+    current.folders ??= []
+    let next = current.folders.find((folder) => folder.slug === node.slug)
+
+    if (!next) {
+      next = {
+        slug: node.slug,
+        title: node.title,
+        description: node.description ?? undefined,
+        folders: [],
+        documents: [],
+      }
+      current.folders.push(next)
+      current.folders.sort((a, b) => {
+        const aOrder = nodes.find((item) => item.slug === a.slug)?.sortOrder ?? 0
+        const bOrder = nodes.find((item) => item.slug === b.slug)?.sortOrder ?? 0
+        return aOrder - bOrder || a.title.localeCompare(b.title)
+      })
+    }
+
+    current = next
   }
+
   return current
 }
 
 export async function getDocumentLibrary(): Promise<LibraryFolder> {
   const root = cloneFolder(documentLibrary)
-  const apiBase = process.env.PAYLOAD_API_URL?.replace(/\/$/, '')
+  const configuredUrl = process.env.PAYLOAD_API_URL
 
-  if (!apiBase) {
+  if (!configuredUrl) {
     console.warn('[AcroReader] PAYLOAD_API_URL is not configured; showing the empty library structure.')
     return root
   }
 
   try {
+    const apiBase = configuredUrl.replace(/\/$/, '')
     const endpoint = new URL('/api/acro-documents', apiBase)
-    endpoint.searchParams.set('depth', '2')
-    endpoint.searchParams.set('limit', '500')
-    endpoint.searchParams.set('sort', 'sortOrder')
-    endpoint.searchParams.set('where[status][in]', 'published,superseded')
+    endpoint.searchParams.set('limit', '1000')
 
     const response = await fetch(endpoint, {
       headers: { Accept: 'application/json' },
@@ -64,13 +93,19 @@ export async function getDocumentLibrary(): Promise<LibraryFolder> {
     }
 
     const payload = (await response.json()) as PayloadResponse
+
     for (const record of payload.docs ?? []) {
       const media = typeof record.pdfFile === 'object' && record.pdfFile !== null
         ? record.pdfFile
         : null
-      if (!media?.url || record.status === 'draft') continue
 
-      const folder = findFolder(root, [record.aircraft, ...(record.folderPath ?? '').split('/').filter(Boolean)])
+      if (!media?.url || !record.aircraft || !record.status) continue
+
+      const nodes = record.folderNodes ?? (record.folderPath
+        ? record.folderPath.split('/').filter(Boolean).map((slug) => ({ slug, title: slug }))
+        : [])
+
+      const folder = ensureFolderPath(root, record.aircraft, nodes)
       if (!folder) continue
 
       const document: LibraryDocument = {
@@ -81,6 +116,7 @@ export async function getDocumentLibrary(): Promise<LibraryFolder> {
         fileUrl: media.url,
         status: record.status === 'published' ? 'current' : 'superseded',
       }
+
       folder.documents ??= []
       folder.documents.push(document)
     }
