@@ -46,3 +46,17 @@ This is the first development milestone, not a completed Acrobat replacement. Th
 4. Add search result navigation and highlighting.
 5. Add mobile pinch/pan gestures, print/share/download and compatibility diagnostics.
 6. Add automated browser/device QA against the Q400 interactive PDF and other test documents.
+
+## Payload backend connection
+
+The document library now loads its published catalogue from the Payload backend on the server. Set `PAYLOAD_API_URL` in the frontend deployment environment to the backend's origin (for example, `https://your-backend.vercel.app`), without a trailing `/api`.
+
+The existing PDF.js viewer remains unchanged. The library passes each published document's Vercel Blob PDF URL to the existing `/reader` route.
+
+In Payload, create an **Aviation Document** under **AcroReader**. Set:
+- Aircraft: DASH 100, DASH 200, DASH 300 or DASH 400
+- Folder path: for example `flight-operations/qrh`
+- Status: Published / Current or Superseded
+- PDF file: upload the original PDF
+
+Draft records are not shown publicly. The library refreshes its server-side data cache every 60 seconds.
