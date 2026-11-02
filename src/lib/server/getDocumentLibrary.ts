@@ -13,7 +13,7 @@ type PayloadDocument = {
   effectiveDate: string
   status: 'published' | 'superseded' | 'draft'
   aircraft: string
-  folderPath?: string[]
+  folderPath?: string
   pdfFile?: PayloadMedia | string | number | null
 }
 
@@ -70,7 +70,7 @@ export async function getDocumentLibrary(): Promise<LibraryFolder> {
         : null
       if (!media?.url || record.status === 'draft') continue
 
-      const folder = findFolder(root, [record.aircraft, ...(record.folderPath ?? [])])
+      const folder = findFolder(root, [record.aircraft, ...(record.folderPath ?? '').split('/').filter(Boolean)])
       if (!folder) continue
 
       const document: LibraryDocument = {
