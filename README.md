@@ -49,14 +49,33 @@ This is the first development milestone, not a completed Acrobat replacement. Th
 
 ## Payload backend connection
 
-The document library now loads its published catalogue from the Payload backend on the server. Set `PAYLOAD_API_URL` in the frontend deployment environment to the backend's origin (for example, `https://your-backend.vercel.app`), without a trailing `/api`.
+AcroReader reads its document catalogue from the Payload CMS backend through the public `GET /api/acro-documents` endpoint.
 
-The existing PDF.js viewer remains unchanged. The library passes each published document's Vercel Blob PDF URL to the existing `/reader` route.
+Set this environment variable in the AcroReader deployment:
 
-In Payload, create an **Aviation Document** under **AcroReader**. Set:
-- Aircraft: DASH 100, DASH 200, DASH 300 or DASH 400
-- Folder path: for example `flight-operations/qrh`
-- Status: Published / Current or Superseded
-- PDF file: upload the original PDF
+```env
+PAYLOAD_API_URL=https://your-payload-project.vercel.app
+```
 
-Draft records are not shown publicly. The library refreshes its server-side data cache every 60 seconds.
+Use the Payload backend origin only; do not add `/api` or a trailing slash. The catalogue is fetched server-side and cached for 60 seconds.
+
+### Payload document setup
+
+1. Create the aircraft records (DASH 100, DASH 200, DASH 300 and DASH 400) in Payload.
+2. Create the category tree using parent relationships, for example DASH 400 → Flight Operations → QRH.
+3. Create a document record and link its aircraft, category and document type.
+4. Create a separate Document Revision record and upload its PDF.
+5. Move the revision through Draft → In Review → Published.
+
+Only Published and Superseded revisions are returned by the public catalogue endpoint. Publishing a new revision updates the document's current revision and preserves the previous revision as history.
+
+### API
+
+- `GET /api/acro-documents` — published and superseded document revisions.
+- `GET /api/acro-documents?aircraft=dash-400` — filter by aircraft series.
+- `GET /api/acro-documents?document=DOCUMENT_ID` — revisions for one document.
+- `GET /api/acro-documents?status=superseded` — historical revisions only.
+
+The API returns document metadata, revision number, effective date, aircraft series, category folder path, and PDF URL. AcroReader maps those records into the existing library layout and opens the PDF using its existing `/reader` route.
+
+**Viewer preservation:** the PDF.js renderer, annotation/link handling, internal PDF navigation, zoom, page controls, local PDF opening and recent-document storage are not replaced by this integration.
