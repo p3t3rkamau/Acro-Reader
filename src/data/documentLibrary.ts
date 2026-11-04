@@ -65,8 +65,8 @@ export const documentLibrary: LibraryFolder = {
   ],
 };
 
-export function findLibraryFolder(path: string[]): LibraryFolder | null {
-  let current: LibraryFolder = documentLibrary;
+export function findLibraryFolder(path: string[], root: LibraryFolder = documentLibrary): LibraryFolder | null {
+  let current: LibraryFolder = root;
   for (const segment of path) {
     const next = current.folders?.find((folder) => folder.slug === segment);
     if (!next) return null;
@@ -75,11 +75,11 @@ export function findLibraryFolder(path: string[]): LibraryFolder | null {
   return current;
 }
 
-export function getLibraryBreadcrumbs(path: string[]) {
+export function getLibraryBreadcrumbs(path: string[], root: LibraryFolder = documentLibrary) {
   const crumbs: { title: string; href: string }[] = [
-    { title: documentLibrary.title, href: '/' },
+    { title: root.title, href: '/' },
   ];
-  let current = documentLibrary;
+  let current = root;
   const accumulated: string[] = [];
   for (const segment of path) {
     const next = current.folders?.find((folder) => folder.slug === segment);

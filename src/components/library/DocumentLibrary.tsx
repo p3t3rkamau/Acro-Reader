@@ -8,6 +8,7 @@ import {
   type LibraryFolder,
 } from '@/data/documentLibrary';
 import styles from './DocumentLibrary.module.scss';
+import { getDocumentLibrary } from '@/lib/server/getDocumentLibrary';
 
 type Props = { path?: string[] };
 
@@ -42,8 +43,9 @@ function FolderCard({ folder, href, index }: { folder: LibraryFolder; href: stri
   );
 }
 
-export default function DocumentLibrary({ path = [] }: Props) {
-  const folder = findLibraryFolder(path);
+export default async function DocumentLibrary({ path = [] }: Props) {
+  const library = await getDocumentLibrary();
+  const folder = findLibraryFolder(path, library);
   if (!folder) {
     return (
       <main className={styles.page}>
@@ -57,7 +59,7 @@ export default function DocumentLibrary({ path = [] }: Props) {
     );
   }
 
-  const breadcrumbs = getLibraryBreadcrumbs(path);
+  const breadcrumbs = getLibraryBreadcrumbs(path, library);
   const childFolders = folder.folders ?? [];
   const documents = folder.documents ?? [];
 
