@@ -40,27 +40,35 @@ function cloneFolder(folder: LibraryFolder): LibraryFolder {
 }
 
 function ensureFolderPath(root: LibraryFolder, aircraft: string, nodes: PayloadFolderNode[]) {
-  let current = root.folders?.find((folder) => folder.slug === aircraft)
-  if (!current) return null
+  const aircraftFolder = root.folders?.find((folder) => folder.slug === aircraft)
+  if (!aircraftFolder) return null
+
+  let current: LibraryFolder = aircraftFolder
 
   for (const node of nodes) {
     current.folders ??= []
-    let next = current.folders.find((folder) => folder.slug === node.slug)
+    let next: LibraryFolder | undefined = current.folders.find(
+      (folder) => folder.slug === node.slug,
+    )
 
     if (!next) {
-      next = {
+      const createdFolder: LibraryFolder = {
         slug: node.slug,
         title: node.title,
         description: node.description ?? undefined,
         folders: [],
         documents: [],
       }
-      current.folders.push(next)
+
+      current.folders.push(createdFolder)
       current.folders.sort((a, b) => {
-        const aOrder = nodes.find((item) => item.slug === a.slug)?.sortOrder ?? Number.MAX_SAFE_INTEGER
-        const bOrder = nodes.find((item) => item.slug === b.slug)?.sortOrder ?? Number.MAX_SAFE_INTEGER
+        const aOrder =
+          nodes.find((item) => item.slug === a.slug)?.sortOrder ?? Number.MAX_SAFE_INTEGER
+        const bOrder =
+          nodes.find((item) => item.slug === b.slug)?.sortOrder ?? Number.MAX_SAFE_INTEGER
         return aOrder - bOrder || a.title.localeCompare(b.title)
       })
+      next = createdFolder
     }
 
     current = next
